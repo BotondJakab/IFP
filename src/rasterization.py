@@ -57,3 +57,25 @@ def assign_vertices(vertices, grid):
 
 
     return cell_vertices
+
+def get_cell_points(vertices, cells, cell):
+    """
+    Returns the vertices belonging to a specific cell.
+
+    Parameters
+    ----------
+    vertices : ndarray (N x 3)
+
+    cells : dict
+
+    cell : tuple(int, int)
+
+    Returns
+    -------
+    ndarray
+        Vertices inside the requested cell.
+    """
+
+    indices = cells[cell]
+
+    return vertices[indices]

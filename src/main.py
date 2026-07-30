@@ -1,7 +1,18 @@
 from mesh_loader import load_mesh
-from visualization import show_mesh, create_grid_lines
-from rasterization import create_grid, assign_vertices
+from visualization import (
+    show_mesh,
+    show_cell,
+    create_grid_lines,
+    show_cell_with_plane,
+)
+from rasterization import (
+    create_grid,
+    assign_vertices,
+    get_cell_points,
+)
 from plane_fitting import fit_plane_pca
+from plane_operations import point_plane_distance
+
 
 # Load mesh
 mesh, vertices, faces = load_mesh(
@@ -52,22 +63,25 @@ cell_points = vertices[indices]
 
 fit_plane_pca(cell_points)"""
 
-test_cell = max(
-    cells,
-    key=lambda cell: len(cells[cell])
-)
+test_cell = (5, 8) #max(cells, key=lambda cell: len(cells[cell]))
+test_cells = [
+    (6,8),   # flat surface with carvings
+    (7,8),   # more complex geometry
+]
 
 print("Testing cell:", test_cell)
 
-indices = cells[test_cell]
-cell_points = vertices[indices]
-
-
-
-from plane_operations import point_plane_distance
-
+cell_points = get_cell_points(
+    vertices,
+    cells,
+    test_cell
+)
 
 plane = fit_plane_pca(cell_points)
+
+show_cell(cell_points)
+#show_cell_with_plane(cell_points, plane)
+
 
 
 distances = point_plane_distance(
