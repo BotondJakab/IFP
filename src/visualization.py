@@ -143,14 +143,20 @@ def create_plane_mesh(plane, size=80):
 
     mesh.compute_vertex_normals()
 
-
     return mesh
 
-def show_cell_with_plane(points, plane):
+def show_cell_with_plane(points, distances, plane):
 
     point_cloud = o3d.geometry.PointCloud()
 
     point_cloud.points = o3d.utility.Vector3dVector(points)
+
+
+    colors = distance_to_colors(distances)
+
+    point_cloud.colors = (
+        o3d.utility.Vector3dVector(colors)
+    )
 
 
     plane_mesh = create_plane_mesh(
@@ -160,10 +166,57 @@ def show_cell_with_plane(points, plane):
 
     #plane_mesh.paint_uniform_color([0.8,0.8,0.8])
 
+
     o3d.visualization.draw_geometries(
         [
             point_cloud,
             plane_mesh
         ],
-        window_name="Cell with fitted plane"
+        window_name="Distance visualization"
     )
+
+def distance_to_colors(distances):
+    """
+    Converts signed distances into a blue-white-red color map.
+
+    Negative distance -> blue
+    Zero distance    -> white
+    Positive distance -> red
+    """
+
+    max_distance = np.max(np.abs(distances))
+
+    if max_distance == 0:
+        max_distance = 1
+
+
+    normalized = distances / max_distance
+
+
+    colors = np.zeros((len(distances), 3))
+
+
+    for i, d in enumerate(normalized):
+
+        if d < 0:
+            # blue -> white
+            t = abs(d)
+
+            colors[i] = [
+                1 - t,
+                1 - t,
+                1
+            ]
+
+        else:
+            # white -> red
+            t = d
+
+            colors[i] = [0, 1, 0
+                #1,
+                #1 - t,
+                #1 - t
+            ]
+
+
+    return colors

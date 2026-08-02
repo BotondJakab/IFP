@@ -1,3 +1,5 @@
+import numpy as np
+
 from mesh_loader import load_mesh
 from visualization import (
     show_mesh,
@@ -12,6 +14,7 @@ from rasterization import (
 )
 from plane_fitting import fit_plane_pca
 from plane_operations import point_plane_distance
+from flattening import flatten_cell
 
 
 # Load mesh
@@ -63,7 +66,7 @@ cell_points = vertices[indices]
 
 fit_plane_pca(cell_points)"""
 
-test_cell = (5, 8) #max(cells, key=lambda cell: len(cells[cell]))
+test_cell = (6, 8) #max(cells, key=lambda cell: len(cells[cell]))
 test_cells = [
     (6,8),   # flat surface with carvings
     (7,8),   # more complex geometry
@@ -79,15 +82,21 @@ cell_points = get_cell_points(
 
 plane = fit_plane_pca(cell_points)
 
-show_cell(cell_points)
-#show_cell_with_plane(cell_points, plane)
-
-
-
 distances = point_plane_distance(
     cell_points,
     plane
 )
+
+flattened_points = flatten_cell(
+    cell_points,
+    plane,
+    threshold=1.2
+)
+
+#show_cell(cell_points)
+#show_cell_with_plane(cell_points, distances, plane)
+show_cell_with_plane(flattened_points, np.zeros(len(flattened_points)),plane)
+
 
 
 print("Distance statistics:")
