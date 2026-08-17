@@ -16,11 +16,13 @@ from rasterization import (
 from plane_fitting import fit_plane_pca
 from plane_operations import point_plane_distance
 from flattening import flatten_cell, flatten_mesh
-
-
+from leveling import (
+    level_cell,
+    level_mesh,
+)
 # Load mesh
 mesh, vertices, faces = load_mesh(
-    "data/Worms_57.ply"
+    "data/Worms_19.ply"
     #"data/C_XII_4.ply"
 )
 
@@ -61,7 +63,13 @@ new_vertices, cell_planes, statistics = flatten_mesh(
     vertices,
     cells,
     fit_plane_pca,
-    threshold=0.65
+    threshold=0.7
+)
+
+leveled_vertices = level_mesh(
+    new_vertices,
+    cells,
+    cell_planes
 )
 
 print()
@@ -101,6 +109,24 @@ o3d.visualization.draw_geometries(
 )
 
 
+leveled_mesh = o3d.geometry.TriangleMesh()
+
+leveled_mesh.vertices = o3d.utility.Vector3dVector(
+    leveled_vertices
+)
+
+leveled_mesh.triangles = o3d.utility.Vector3iVector(
+    faces
+)
+
+leveled_mesh.compute_vertex_normals()
+
+o3d.visualization.draw_geometries(
+    [leveled_mesh],
+    window_name="Leveled Mesh"
+)
+
+
 
 
 
@@ -116,6 +142,7 @@ cell_points = vertices[indices]
 fit_plane_pca(cell_points)"""
 
 """
+ 
 test_cell = (6, 8) #max(cells, key=lambda cell: len(cells[cell]))
 test_cells = [
     (6,8),   # flat surface with carvings
@@ -143,9 +170,15 @@ flattened_points = flatten_cell(
     threshold=1.2
 )
 
+leveled_points = level_cell(
+    flattened_points,
+    plane
+) 
+
+show_cell_with_plane(leveled_points, np.zeros(len(flattened_points)),plane)
 #show_cell(cell_points)
 #show_cell_with_plane(cell_points, distances, plane)
-show_cell_with_plane(flattened_points, np.zeros(len(flattened_points)),plane)
+#show_cell_with_plane(flattened_points, np.zeros(len(flattened_points)),plane)
 
 
 
@@ -154,10 +187,9 @@ print("min:", distances.min())
 print("max:", distances.max())
 print("mean:", distances.mean())
 print("std:", distances.std())
-"""
 
 print("Number of occupied cells:", len(cells))
-
+"""
 
 # Show some example cells
 for cell, ids in list(cells.items())[:5]:
