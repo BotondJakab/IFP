@@ -212,10 +212,10 @@ def distance_to_colors(distances):
             # white -> red
             t = d
 
-            colors[i] = [0, 1, 0
-                #1,
-                #1 - t,
-                #1 - t
+            colors[i] = [#0, 1, 0
+                1,
+                1 - t,
+                1 - t
             ]
 
 

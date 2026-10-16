@@ -22,8 +22,8 @@ from leveling import (
 )
 # Load mesh
 mesh, vertices, faces = load_mesh(
-    "data/Worms_19.ply"
-    #"data/C_XII_4.ply"
+    #"data/Worms_19_GMO.ply"
+    "data/BleiplatteSpeyer2.ply"
 )
 
 
@@ -35,9 +35,9 @@ print("Number of faces:", len(faces))
 # Create XY grid
 grid = create_grid(
     vertices,
-    cell_size=50
+    cell_size=10
 )
-
+threshold=.003
 
 print("Grid size:")
 print(
@@ -59,11 +59,104 @@ cells = assign_vertices(
     grid
 )
 
+
+
+# Show some example cells
+for cell, ids in list(cells.items())[:5]:
+    print(
+        cell,
+        "contains",
+        len(ids),
+        "vertices"
+    )
+
+
+# Finally visualize mesh
+#show_mesh(mesh)
+
+"""
+o3d.visualization.draw_geometries(
+    [
+        mesh,
+        grid_lines
+    ],
+    window_name="Mesh with grid"
+)
+
+"""
+
+#=====================================================================
+
+# Pick one cell (the first occupied one) 
+"""
+first_cell = next(iter(cells))
+
+print("Testing cell:", first_cell)
+
+indices = cells[first_cell]
+cell_points = vertices[indices]
+
+fit_plane_pca(cell_points)"""
+
+"""
+test_cell = (6, 8) #max(cells, key=lambda cell: len(cells[cell]))
+test_cells = [
+    (6,8),   # flat surface with carvings
+    (7,8),   # more complex geometry
+]
+
+print("Testing cell:", test_cell)
+
+cell_points = get_cell_points(
+    vertices,
+    cells,
+    test_cell
+)
+
+plane = fit_plane_pca(cell_points)
+
+distances = point_plane_distance(
+    cell_points,
+    plane
+)
+
+flattened_points = flatten_cell(
+    cell_points,
+    plane,
+    threshold=1.2
+)
+
+leveled_points = level_cell(
+    flattened_points,
+    plane
+) 
+
+#show_cell_with_plane(leveled_points, np.zeros(len(flattened_points)),plane)
+#show_cell(cell_points)
+show_cell_with_plane(cell_points, distances, plane)
+show_cell_with_plane(flattened_points, distances,plane)
+
+"""
+"""
+print("Distance statistics:")
+print("min:", distances.min())
+print("max:", distances.max())
+print("mean:", distances.mean())
+print("std:", distances.std())
+
+print("Number of occupied cells:", len(cells))
+"""
+
+
+#===============================================================================
+
+
+
 new_vertices, cell_planes, statistics = flatten_mesh(
     vertices,
     cells,
     fit_plane_pca,
-    threshold=0.7
+    threshold
 )
 
 leveled_vertices = level_mesh(
@@ -128,88 +221,3 @@ o3d.visualization.draw_geometries(
 
 
 
-
-
-# Pick one cell (the first occupied one) 
-"""
-first_cell = next(iter(cells))
-
-print("Testing cell:", first_cell)
-
-indices = cells[first_cell]
-cell_points = vertices[indices]
-
-fit_plane_pca(cell_points)"""
-
-"""
- 
-test_cell = (6, 8) #max(cells, key=lambda cell: len(cells[cell]))
-test_cells = [
-    (6,8),   # flat surface with carvings
-    (7,8),   # more complex geometry
-]
-
-print("Testing cell:", test_cell)
-
-cell_points = get_cell_points(
-    vertices,
-    cells,
-    test_cell
-)
-
-plane = fit_plane_pca(cell_points)
-
-distances = point_plane_distance(
-    cell_points,
-    plane
-)
-
-flattened_points = flatten_cell(
-    cell_points,
-    plane,
-    threshold=1.2
-)
-
-leveled_points = level_cell(
-    flattened_points,
-    plane
-) 
-
-show_cell_with_plane(leveled_points, np.zeros(len(flattened_points)),plane)
-#show_cell(cell_points)
-#show_cell_with_plane(cell_points, distances, plane)
-#show_cell_with_plane(flattened_points, np.zeros(len(flattened_points)),plane)
-
-
-
-print("Distance statistics:")
-print("min:", distances.min())
-print("max:", distances.max())
-print("mean:", distances.mean())
-print("std:", distances.std())
-
-print("Number of occupied cells:", len(cells))
-"""
-
-# Show some example cells
-for cell, ids in list(cells.items())[:5]:
-    print(
-        cell,
-        "contains",
-        len(ids),
-        "vertices"
-    )
-
-
-# Finally visualize mesh
-#show_mesh(mesh)
-
-import open3d as o3d
-
-o3d.visualization.draw_geometries(
-    [
-        mesh,
-        grid_lines
-    ],
-    window_name="Mesh with grid"
-)
