@@ -1,6 +1,6 @@
 import numpy as np
 
-from geometry import Plane
+from .geometry import Plane
 
 
 def fit_plane_pca(points):

@@ -147,8 +147,9 @@ def flatten_mesh_old(vertices, cells, fit_plane_function, threshold):
     return new_vertices, cell_planes, statistics
 
 
-def flatten_mesh(vertices, cells, fit_plane_function, threshold):
+def flatten_mesh_less_old(vertices, cells, fit_plane_function, threshold):
     """
+    WORKING VERSION WITHOUT UI
     Flattens all occupied cells independently.
 
     Cells with enough vertices get their own PCA plane.
@@ -301,3 +302,202 @@ def flatten_mesh(vertices, cells, fit_plane_function, threshold):
         cell_planes,
         statistics
     )
+
+
+def flatten_mesh(
+    vertices,
+    cells,
+    fit_plane_function,
+    threshold,
+    progress_callback=None,
+):
+    """
+    Flatten all occupied cells independently.
+
+    Optionally report progress through progress_callback.
+
+    The callback receives:
+        stage, cell, current, total, status
+
+    Stages:
+        "fitting_planes"
+        "assigning_planes"
+        "flattening"
+
+    Status:
+        "stage_started"
+        "cell_started"
+        "cell_completed"
+        "stage_completed"
+    """
+
+    # Never modify the original vertex array
+    new_vertices = vertices.copy()
+
+    MIN_POINTS = 100
+
+    # Send progress information only when a callback is provided
+    def report(stage, cell, current, total, status):
+        if progress_callback is not None:
+            progress_callback(
+                stage, cell, current, total, status
+            )
+
+    # --------------------------------------------------
+    # STEP 1: Fit planes to cells with enough points
+    # --------------------------------------------------
+
+    valid_cell_planes = {}
+
+    skipped_cells = 0
+    total_cells = len(cells)
+
+    report(
+        "fitting_planes", None, 0, total_cells,
+        "stage_started"
+    )
+
+    for current, (cell, indices) in enumerate(
+        cells.items(), start=1
+    ):
+        report(
+            "fitting_planes", cell, current, total_cells,
+            "cell_started"
+        )
+
+        if len(indices) < MIN_POINTS:
+            skipped_cells += 1
+        else:
+            cell_points = vertices[indices]
+
+            plane = fit_plane_function(cell_points)
+
+            valid_cell_planes[cell] = plane
+
+        report(
+            "fitting_planes", cell, current, total_cells,
+            "cell_completed"
+        )
+
+    report(
+        "fitting_planes", None, total_cells, total_cells,
+        "stage_completed"
+    )
+
+    # --------------------------------------------------
+    # STEP 2: Assign a plane to every occupied cell
+    # --------------------------------------------------
+
+    cell_planes = {}
+    inherited_cells = 0
+
+    report(
+        "assigning_planes", None, 0, total_cells,
+        "stage_started"
+    )
+
+    for current, cell in enumerate(cells, start=1):
+        report(
+            "assigning_planes", cell, current, total_cells,
+            "cell_started"
+        )
+
+        if cell in valid_cell_planes:
+            cell_planes[cell] = valid_cell_planes[cell]
+
+        else:
+            if not valid_cell_planes:
+                raise ValueError(
+                    "Cannot flatten the mesh: no occupied cell "
+                    "has enough points to fit a plane. "
+                    "Consider reducing MIN_POINTS."
+                )
+
+            nearest_cell = min(
+                valid_cell_planes.keys(),
+                key=lambda other_cell:
+                    (cell[0] - other_cell[0]) ** 2
+                    + (cell[1] - other_cell[1]) ** 2
+            )
+
+            cell_planes[cell] = valid_cell_planes[nearest_cell]
+            inherited_cells += 1
+
+        report(
+            "assigning_planes", cell, current, total_cells,
+            "cell_completed"
+        )
+
+    report(
+        "assigning_planes", None, total_cells, total_cells,
+        "stage_completed"
+    )
+
+    # --------------------------------------------------
+    # STEP 3: Flatten every occupied cell
+    # --------------------------------------------------
+
+    processed_cells = 0
+    flattened_vertices = 0
+    preserved_vertices = 0
+
+    report(
+        "flattening", None, 0, total_cells,
+        "stage_started"
+    )
+
+    for current, (cell, indices) in enumerate(
+        cells.items(), start=1
+    ):
+        report(
+            "flattening", cell, current, total_cells,
+            "cell_started"
+        )
+
+        cell_points = vertices[indices]
+        plane = cell_planes[cell]
+
+        flattened_points = flatten_cell(
+            cell_points,
+            plane,
+            threshold
+        )
+
+        # Count what happened
+        changed = np.linalg.norm(
+            flattened_points - cell_points,
+            axis=1
+        )
+
+        flattened_vertices += np.count_nonzero(
+            changed > 1e-10
+        )
+
+        preserved_vertices += np.count_nonzero(
+            changed <= 1e-10
+        )
+
+        # Put modified points back into the global array
+        new_vertices[indices] = flattened_points
+
+        processed_cells += 1
+
+        report(
+            "flattening", cell, current, total_cells,
+            "cell_completed"
+        )
+
+    report(
+        "flattening", None, total_cells, total_cells,
+        "stage_completed"
+    )
+
+    statistics = {
+        "processed_cells": processed_cells,
+        "skipped_cells": skipped_cells,
+        "inherited_cells": inherited_cells,
+        "flattened_vertices": flattened_vertices,
+        "preserved_vertices": preserved_vertices,
+    }
+
+    return new_vertices, cell_planes, statistics
