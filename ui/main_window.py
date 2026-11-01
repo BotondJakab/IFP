@@ -12,17 +12,21 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QLineEdit,
     QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QFormLayout,
     QStatusBar,
-    QProgressBar
+    QProgressBar,
+    QSizePolicy
 )
+from PySide6.QtGui import QIntValidator
 from pyvistaqt import QtInteractor
 import numpy as np
 from src.rasterization import create_grid, assign_vertices
 from ui.processing_worker import FlatteningWorker
+from src.leveling import level_mesh
 
 
 class MainWindow(QMainWindow):
@@ -49,6 +53,9 @@ class MainWindow(QMainWindow):
         self.display_mesh_actor = None
         self.displayed_mesh = None
 
+        self.leveled_mesh = None
+        self.cells = None
+
         # Main layout
         central_widget = QWidget()
         main_layout = QHBoxLayout(central_widget)
@@ -72,10 +79,31 @@ class MainWindow(QMainWindow):
         self.file_label = QLabel("No mesh loaded")
         self.file_label.setWordWrap(True)
 
+        self.reload_button = QPushButton("⟳")
+        self.reload_button.setFixedSize(32, 32)
+        self.reload_button.setStyleSheet("""
+            QPushButton {
+                font-size: 26px;
+                padding: 0px;
+                text-align: bottom;
+            }
+        """)
+        self.reload_button.setToolTip("Reload original mesh")
+        self.reload_button.setEnabled(False)
+        self.reload_button.setVisible(False)
+        self.reload_button.clicked.connect(self.reload_mesh)
+
+        self.file_row = QWidget()
+        file_layout = QHBoxLayout(self.file_row)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.addWidget(self.file_label)
+        file_layout.addStretch()
+        file_layout.addWidget(self.reload_button)
+
         self.load_button = QPushButton("Open PLY File")
         self.load_button.clicked.connect(self.load_mesh)
 
-        controls_layout.addWidget(self.file_label)
+        controls_layout.addWidget(self.file_row)
         controls_layout.addWidget(self.load_button)
 
         #Display mode button
@@ -92,29 +120,56 @@ class MainWindow(QMainWindow):
         # Parameters
         parameter_box = QGroupBox("Parameters")
         parameter_layout = QFormLayout(parameter_box)
+        parameter_layout.setHorizontalSpacing(2)
 
         self.grid_slider = QSlider(Qt.Orientation.Horizontal)
         self.grid_slider.setRange(5, 150)
         self.grid_slider.setValue(60)
+        self.grid_slider.setFixedWidth(80)
 
-        self.grid_label = QLabel("60")
+        self.grid_input = QLineEdit()
+        self.grid_input.setFixedWidth(30)
+        self.grid_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.grid_input.setText("60")
+        self.grid_input.setValidator(QIntValidator(5, 150, self))
 
         grid_row = QWidget()
         grid_layout = QHBoxLayout(grid_row)
         grid_layout.setContentsMargins(0, 0, 0, 0)
         grid_layout.addWidget(self.grid_slider)
-        grid_layout.addWidget(self.grid_label)
+        grid_layout.addWidget(self.grid_input)
 
         parameter_layout.addRow("Grid size", grid_row)
 
+        # Slider updates text field
+        self.grid_slider.valueChanged.connect(
+            lambda value: self.grid_input.setText(str(value))
+        )
+
+        # Entered value updates slider
+        self.grid_input.editingFinished.connect(
+            self.update_grid_from_input
+        )
+
         self.threshold_input = QDoubleSpinBox()
-        self.threshold_input.setRange(0.0, 20.0)
+        self.threshold_input.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.threshold_input.setDecimals(2)
+        self.threshold_input.setRange(0.001, 10.0)
         self.threshold_input.setSingleStep(0.1)
         self.threshold_input.setValue(1.0)
 
+        self.threshold_input.valueChanged.connect(
+            self.update_threshold_step
+        )
+
+        # Create a container layout to push the spinbox to the right
+        spinbox_container = QHBoxLayout()
+        spinbox_container.addWidget(self.threshold_input, alignment=Qt.AlignmentFlag.AlignRight)
+
+        # Add the container layout to the form layout row instead of the widget directly
         parameter_layout.addRow(
-            "Flattening threshold",
-            self.threshold_input,
+            "Flattening threshold ",
+            spinbox_container,
         )
 
         controls_layout.addWidget(parameter_box)
@@ -135,6 +190,13 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         controls_layout.addWidget(self.progress_bar)
+
+        # Leveling button
+        self.level_button = QPushButton("Level Cells")
+        self.level_button.setEnabled(False)
+        self.level_button.clicked.connect(self.start_leveling)
+        self.level_button.setVisible(False)     
+        controls_layout.addWidget(self.level_button)
 
         controls_layout.addStretch()
 
@@ -172,7 +234,7 @@ class MainWindow(QMainWindow):
 
             # Create a lighter copy for interactive display if needed.
             preview_mesh = mesh
-
+            """
             if mesh.n_cells > 200_000:
                 try:
                     preview_mesh = mesh.decimate_pro(
@@ -186,7 +248,7 @@ class MainWindow(QMainWindow):
                 except Exception as error:
                     print("Preview simplification failed:", error)
                     preview_mesh = mesh
-
+            """
             # Reset the display mode to vertex colors.
             self.display_mode = "vertex_colors"
 
@@ -202,6 +264,14 @@ class MainWindow(QMainWindow):
             self.active_cell_actor = None
             self.display_mesh_actor = None
             self.displayed_mesh = None
+
+            self.reload_button.setVisible(True)
+            self.reload_button.setEnabled(True)
+            self.level_button.setEnabled(False)
+            self.leveled_mesh = None
+            self.flattened_mesh = None
+            self.cell_planes = None
+            self.cells = None
 
             # Display the new mesh with the shared lighting setup.
             self.display_mesh(
@@ -230,6 +300,55 @@ class MainWindow(QMainWindow):
             )
             print("Mesh loading failed:", error)
 
+    def reload_mesh(self):
+        if self.mesh is None:
+            return
+
+        if self.worker is not None and self.worker.isRunning():
+            return
+
+        # Clear previous processing results
+        self.flattened_mesh = None
+        self.leveled_mesh = None
+        self.cell_planes = None
+        self.flattening_statistics = None
+        self.cells = None
+        self.processing_grid = None
+
+        # Clear the viewer
+        self.viewer.clear()
+
+        self.grid_actor = None
+        self.active_cell_actor = None
+        self.display_mesh_actor = None
+        self.displayed_mesh = None
+
+        # Restore original display mode
+        self.display_mode = "vertex_colors"
+        self.display_mode_button.blockSignals(True)
+        self.display_mode_button.setChecked(True)
+        self.display_mode_button.setText("Show Gray")
+        self.display_mode_button.blockSignals(False)
+
+        # Display original mesh
+        self.display_mesh(self.mesh, reset_camera=True)
+
+        self.viewer.view_xy()
+        self.update_grid_overlay()
+        self.viewer.render()
+
+        # Reset progress
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Ready to flatten")
+
+        # Reset buttons
+        self.run_button.setEnabled(True)
+        self.level_button.setEnabled(False)
+
+        self.statusBar().showMessage(
+            "Original mesh reloaded. Ready to process."
+        )
+        
     def display_mesh(self, mesh, reset_camera=False):
         self.displayed_mesh = mesh
 
@@ -368,8 +487,36 @@ class MainWindow(QMainWindow):
             name="grid_overlay",
         )
 
-        self.grid_label.setText(str(cell_size))
+        self.grid_input.setText(str(cell_size))
         self.viewer.render()
+
+    def update_grid_from_input(self):
+        text = self.grid_input.text()
+
+        if not text:
+            self.grid_input.setText(
+                str(self.grid_slider.value())
+            )
+            return
+
+        value = int(text)
+        value = max(5, min(150, value))
+
+        self.grid_slider.setValue(value)
+        self.grid_input.setText(str(value))
+
+    def update_threshold_step(self, value):
+        if value > 0.1:
+            self.threshold_input.setDecimals(2)
+            self.threshold_input.setSingleStep(0.1)
+
+        elif value > 0.01:
+            self.threshold_input.setDecimals(2)
+            self.threshold_input.setSingleStep(0.01)
+
+        elif value > 0.001:
+            self.threshold_input.setDecimals(3)
+            self.threshold_input.setSingleStep(0.001)
 
     def start_flattening(self):
         if self.mesh is None:
@@ -387,7 +534,8 @@ class MainWindow(QMainWindow):
             )
 
             cells = assign_vertices(vertices, grid)
-
+            
+            self.cells = cells
             self.processing_grid = grid
 
             if not cells:
@@ -400,7 +548,7 @@ class MainWindow(QMainWindow):
             self.grid_actor = None
             self.active_cell_actor = None
 
-            preview_mesh = self.mesh
+            preview_mesh = self.mesh.copy(deep=True)
             self.display_mode = "gray"
             self.display_mesh(preview_mesh, reset_camera=False)
             
@@ -410,6 +558,7 @@ class MainWindow(QMainWindow):
             # Disable controls while processing
             self.run_button.setEnabled(False)
             self.load_button.setEnabled(False)
+            self.reload_button.setEnabled(False)
             self.grid_slider.setEnabled(False)
             self.threshold_input.setEnabled(False)
 
@@ -428,6 +577,9 @@ class MainWindow(QMainWindow):
             )
             self.worker.processing_failed.connect(
                 self.handle_flattening_failed
+            )
+            self.worker.cell_updated.connect(
+                self.handle_cell_geometry_updated
             )
 
             self.worker.start()
@@ -504,6 +656,20 @@ class MainWindow(QMainWindow):
             name="active_cell",
         )
 
+        self.viewer.render()
+
+    def handle_cell_geometry_updated(self, indices, points):
+        if self.displayed_mesh is None:
+            return
+
+        # Update only the vertices belonging to the completed cell.
+        self.displayed_mesh.points[indices] = points
+
+        # Notify VTK that the mesh geometry has changed.
+        self.displayed_mesh.GetPoints().Modified()
+        self.displayed_mesh.Modified()
+
+        # Refresh the 3D view.
         self.viewer.render()
 
     def handle_flattening_finished(
@@ -585,9 +751,11 @@ class MainWindow(QMainWindow):
 
         self.run_button.setEnabled(True)
         self.load_button.setEnabled(True)
+        self.reload_button.setEnabled(True)
         self.grid_slider.setEnabled(True)
         self.threshold_input.setEnabled(True)
-
+        self.level_button.setEnabled(True)
+        self.level_button.setVisible(True)
 
     def handle_flattening_failed(self, error_message):
         print(error_message)
@@ -597,5 +765,96 @@ class MainWindow(QMainWindow):
 
         self.run_button.setEnabled(True)
         self.load_button.setEnabled(True)
+        self.reload_button.setEnabled(True)
         self.grid_slider.setEnabled(True)
         self.threshold_input.setEnabled(True)
+
+    def start_leveling(self):
+        if self.flattened_mesh is None:
+            self.statusBar().showMessage(
+                "Flatten the mesh before leveling."
+            )
+            return
+
+        if self.cell_planes is None:
+            self.statusBar().showMessage(
+                "No fitted planes are available."
+            )
+            return
+
+        try:
+            vertices = np.asarray(
+                self.flattened_mesh.points
+            ).copy()
+
+            leveled_vertices = level_mesh(
+                vertices,
+                self.cells,
+                self.cell_planes,
+            )
+
+            # Preserve the mesh's original average Z position
+            original_z = np.mean(vertices[:, 2])
+            leveled_z = np.mean(leveled_vertices[:, 2])
+
+            leveled_vertices[:, 2] += original_z - leveled_z
+
+            print("\n--- LEVELING DIAGNOSTICS ---")
+            print("Original mesh bounds:")
+            print("Min:", vertices.min(axis=0))
+            print("Max:", vertices.max(axis=0))
+
+            print("\nLeveled mesh bounds:")
+            print("Min:", leveled_vertices.min(axis=0))
+            print("Max:", leveled_vertices.max(axis=0))
+
+            print("\nCoordinate values are finite:",
+                np.isfinite(leveled_vertices).all())
+
+            print("Original center:",
+                (vertices.min(axis=0) + vertices.max(axis=0)) / 2)
+
+            print("Leveled center:",
+                (leveled_vertices.min(axis=0)
+                + leveled_vertices.max(axis=0)) / 2)
+            print("---------------------------\n")
+
+            result_mesh = self.flattened_mesh.copy(
+                deep=True
+            )
+            result_mesh.points = leveled_vertices
+
+            self.leveled_mesh = result_mesh
+
+            self.viewer.clear()
+            self.grid_actor = None
+            self.active_cell_actor = None
+            self.display_mesh_actor = None
+            self.displayed_mesh = None
+
+            preview_mesh = result_mesh
+            """
+            if result_mesh.n_cells > 200_000:
+                try:
+                    preview_mesh = result_mesh.decimate_pro(
+                        0.75,
+                        preserve_topology=True,
+                    )
+                except Exception as error:
+                    print("Preview decimation failed:", error)
+            """
+            self.display_mesh(
+                preview_mesh,
+                reset_camera=False,
+            )
+            self.viewer.render()
+
+            self.statusBar().showMessage(
+                "Cell leveling completed."
+            )
+
+        except Exception as error:
+            self.statusBar().showMessage(
+                f"Leveling failed: {error}"
+            )
+            print("Leveling failed:", error)

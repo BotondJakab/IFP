@@ -12,11 +12,14 @@ class FlatteningWorker(QThread):
     # stage, cell, current, total, status
     progress = Signal(str, object, int, int, str)
 
+    cell_updated = Signal(object, object)
+
     # Flattened vertices, fitted planes, statistics
     processing_finished = Signal(object, object, object)
 
     # Error message if processing fails
     processing_failed = Signal(str)
+
 
     def __init__(self, vertices, cells, threshold):
         super().__init__()
@@ -33,6 +36,7 @@ class FlatteningWorker(QThread):
                 fit_plane_pca,
                 self.threshold,
                 progress_callback=self.report_progress,
+                cell_update_callback=self.report_cell_update,
             )
 
             self.processing_finished.emit(
@@ -52,3 +56,6 @@ class FlatteningWorker(QThread):
             total,
             status,
         )
+
+    def report_cell_update(self, indices, points):
+        self.cell_updated.emit(indices, points)

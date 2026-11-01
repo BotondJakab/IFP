@@ -310,6 +310,7 @@ def flatten_mesh(
     fit_plane_function,
     threshold,
     progress_callback=None,
+    cell_update_callback=None,
 ):
     """
     Flatten all occupied cells independently.
@@ -342,6 +343,15 @@ def flatten_mesh(
             progress_callback(
                 stage, cell, current, total, status
             )
+
+    # Process cells in a predictable serpentine order - probably not
+    ordered_cells = sorted(
+        cells.keys(),
+        key=lambda cell: (
+            cell[1],
+            cell[0] if cell[1] % 2 == 0 else -cell[0],
+        ),
+    )
 
     # --------------------------------------------------
     # STEP 1: Fit planes to cells with enough points
@@ -480,6 +490,12 @@ def flatten_mesh(
         # Put modified points back into the global array
         new_vertices[indices] = flattened_points
 
+        # Send this cell's updated geometry to the UI.
+        if cell_update_callback is not None:
+            cell_update_callback(
+                indices,
+                flattened_points.copy(),
+            )
         processed_cells += 1
 
         report(
