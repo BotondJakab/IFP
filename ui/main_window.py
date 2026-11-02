@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QStatusBar,
     QProgressBar,
-    QSizePolicy
+    QSizePolicy,
+    QFileDialog
 )
 from PySide6.QtGui import QIntValidator
 from pyvistaqt import QtInteractor
@@ -27,7 +28,7 @@ import numpy as np
 from src.rasterization import create_grid, assign_vertices
 from ui.processing_worker import FlatteningWorker
 from src.leveling import level_mesh
-
+import open3d as o3d
 
 class MainWindow(QMainWindow):
 
@@ -55,6 +56,10 @@ class MainWindow(QMainWindow):
 
         self.leveled_mesh = None
         self.cells = None
+
+        self.clipped_mesh = None
+        self.showing_clipped_mesh = False
+        self.reference_plane_z = None
 
         # Main layout
         central_widget = QWidget()
@@ -123,7 +128,7 @@ class MainWindow(QMainWindow):
         parameter_layout.setHorizontalSpacing(2)
 
         self.grid_slider = QSlider(Qt.Orientation.Horizontal)
-        self.grid_slider.setRange(5, 150)
+        self.grid_slider.setRange(3, 150)
         self.grid_slider.setValue(60)
         self.grid_slider.setFixedWidth(80)
 
@@ -131,7 +136,7 @@ class MainWindow(QMainWindow):
         self.grid_input.setFixedWidth(30)
         self.grid_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.grid_input.setText("60")
-        self.grid_input.setValidator(QIntValidator(5, 150, self))
+        self.grid_input.setValidator(QIntValidator(3, 150, self))
 
         grid_row = QWidget()
         grid_layout = QHBoxLayout(grid_row)
@@ -198,6 +203,30 @@ class MainWindow(QMainWindow):
         self.level_button.setVisible(False)     
         controls_layout.addWidget(self.level_button)
 
+        #Cut backgroud button
+        self.cut_background_button = QPushButton("Cut Background")
+        self.cut_background_button.setEnabled(False)
+        self.cut_background_button.clicked.connect(
+            self.toggle_background_cut
+        )
+        controls_layout.addWidget(self.cut_background_button)
+        
+        # Export section
+        export_box = QGroupBox("Export")
+        export_layout = QVBoxLayout(export_box)
+
+        self.export_ply_button = QPushButton("Export PLY")
+        self.export_ply_button.setEnabled(False)
+        self.export_ply_button.clicked.connect(self.export_ply)
+        export_layout.addWidget(self.export_ply_button)
+
+        self.export_png_button = QPushButton("Export PNG")
+        self.export_png_button.setEnabled(False)
+        self.export_png_button.clicked.connect(self.export_png)
+        export_layout.addWidget(self.export_png_button)
+
+        controls_layout.addWidget(export_box)
+
         controls_layout.addStretch()
 
         main_layout.addWidget(controls, 1)
@@ -257,6 +286,10 @@ class MainWindow(QMainWindow):
             self.display_mode_button.setText("Show Gray")
             self.display_mode_button.blockSignals(False)
             self.display_mode_button.setVisible(True)
+            self.cut_background_button.setEnabled(False)
+            self.cut_background_button.setText("Cut Background")
+            self.export_ply_button.setEnabled(True)
+            self.export_png_button.setEnabled(True)
 
             # Clear the OLD scene before displaying the NEW mesh.
             self.viewer.clear()
@@ -272,6 +305,15 @@ class MainWindow(QMainWindow):
             self.flattened_mesh = None
             self.cell_planes = None
             self.cells = None
+            self.clipped_mesh = None
+            self.showing_clipped_mesh = False
+            self.reference_plane_z = None
+
+
+            # Normalize the mesh vertically so its average Z is zero.
+            vertices = np.asarray(mesh.points).copy()
+            vertices[:, 2] -= np.mean(vertices[:, 2])
+            mesh.points = vertices
 
             # Display the new mesh with the shared lighting setup.
             self.display_mesh(
@@ -281,6 +323,15 @@ class MainWindow(QMainWindow):
 
             # Print available arrays for troubleshooting.
             print("Point data arrays:", list(mesh.point_data.keys()))
+
+            for name in mesh.point_data.keys():
+                array = mesh.point_data[name]
+                print(
+                    name,
+                    "shape:", array.shape,
+                    "dtype:", array.dtype,
+                    "range:", array.min(), array.max()
+                )
 
             # Set the camera and redraw the grid.
             self.viewer.view_xy()
@@ -322,6 +373,10 @@ class MainWindow(QMainWindow):
         self.active_cell_actor = None
         self.display_mesh_actor = None
         self.displayed_mesh = None
+        self.clipped_mesh = None
+        self.showing_clipped_mesh = False
+        self.reference_plane_z = None
+        self.cut_background_button.setEnabled(False)
 
         # Restore original display mode
         self.display_mode = "vertex_colors"
@@ -588,7 +643,6 @@ class MainWindow(QMainWindow):
             self.progress_label.setText("Could not start flattening")
             self.statusBar().showMessage(str(error))
 
-
     def handle_flattening_progress(
         self, stage, cell, current, total, status
     ):
@@ -793,58 +847,27 @@ class MainWindow(QMainWindow):
                 self.cell_planes,
             )
 
-            # Preserve the mesh's original average Z position
-            original_z = np.mean(vertices[:, 2])
-            leveled_z = np.mean(leveled_vertices[:, 2])
-
-            leveled_vertices[:, 2] += original_z - leveled_z
-
-            print("\n--- LEVELING DIAGNOSTICS ---")
-            print("Original mesh bounds:")
-            print("Min:", vertices.min(axis=0))
-            print("Max:", vertices.max(axis=0))
-
-            print("\nLeveled mesh bounds:")
-            print("Min:", leveled_vertices.min(axis=0))
-            print("Max:", leveled_vertices.max(axis=0))
-
-            print("\nCoordinate values are finite:",
-                np.isfinite(leveled_vertices).all())
-
-            print("Original center:",
-                (vertices.min(axis=0) + vertices.max(axis=0)) / 2)
-
-            print("Leveled center:",
-                (leveled_vertices.min(axis=0)
-                + leveled_vertices.max(axis=0)) / 2)
-            print("---------------------------\n")
-
-            result_mesh = self.flattened_mesh.copy(
-                deep=True
-            )
+            # Create the leveled mesh without modifying the original.
+            result_mesh = self.flattened_mesh.copy(deep=True)
             result_mesh.points = leveled_vertices
 
             self.leveled_mesh = result_mesh
 
+            self.reference_plane_z = -0.01
+            self.clipped_mesh = None
+            self.showing_clipped_mesh = False
+            self.cut_background_button.setEnabled(True)
+
+            # Clear the previous visualization.
             self.viewer.clear()
             self.grid_actor = None
             self.active_cell_actor = None
             self.display_mesh_actor = None
             self.displayed_mesh = None
 
-            preview_mesh = result_mesh
-            """
-            if result_mesh.n_cells > 200_000:
-                try:
-                    preview_mesh = result_mesh.decimate_pro(
-                        0.75,
-                        preserve_topology=True,
-                    )
-                except Exception as error:
-                    print("Preview decimation failed:", error)
-            """
+            # Display the leveled mesh.
             self.display_mesh(
-                preview_mesh,
+                result_mesh,
                 reset_camera=False,
             )
             self.viewer.render()
@@ -858,3 +881,231 @@ class MainWindow(QMainWindow):
                 f"Leveling failed: {error}"
             )
             print("Leveling failed:", error)
+
+    def toggle_background_cut(self):
+        if self.leveled_mesh is None:
+            return
+
+        # Create the clipped mesh the first time the button is used.
+        if self.clipped_mesh is None:
+            try:
+                self.clipped_mesh = self.leveled_mesh.clip(
+                    normal=(0, 0, 1),
+                    origin=(0, 0, self.reference_plane_z),
+                    invert=True,
+                )
+
+                if self.clipped_mesh.n_points == 0:
+                    self.statusBar().showMessage(
+                        "Background cutting produced an empty mesh."
+                    )
+                    self.clipped_mesh = None
+                    return
+
+            except Exception as error:
+                self.statusBar().showMessage(
+                    f"Background cutting failed: {error}"
+                )
+                return
+
+        # Switch between the complete and clipped meshes.
+        self.showing_clipped_mesh = not self.showing_clipped_mesh
+
+        if self.showing_clipped_mesh:
+            mesh_to_display = self.clipped_mesh
+            self.cut_background_button.setText("Show Full Mesh")
+            self.statusBar().showMessage("Background removed.")
+        else:
+            mesh_to_display = self.leveled_mesh
+            self.cut_background_button.setText("Cut Background")
+            self.statusBar().showMessage("Showing complete leveled mesh.")
+
+        self.viewer.clear()
+        self.grid_actor = None
+        self.active_cell_actor = None
+        self.display_mesh_actor = None
+        self.displayed_mesh = None
+
+        self.display_mesh(
+            mesh_to_display,
+            reset_camera=False,
+        )
+
+        self.viewer.render()
+
+
+    def export_ply(self):
+        if self.displayed_mesh is None:
+            self.statusBar().showMessage(
+                "No mesh available to export."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export mesh",
+            "exported_mesh.ply",
+            "PLY files (*.ply)",
+        )
+
+        if not path:
+            return
+
+        if not path.lower().endswith(".ply"):
+            path += ".ply"
+
+        try:
+            # Triangulate the mesh before converting it.
+            mesh = self.displayed_mesh.triangulate()
+
+            vertices = np.asarray(mesh.points)
+            faces = np.asarray(mesh.faces).reshape(-1, 4)[:, 1:4]
+
+            export_mesh = o3d.geometry.TriangleMesh()
+
+            export_mesh.vertices = o3d.utility.Vector3dVector(
+                vertices
+            )
+
+            export_mesh.triangles = o3d.utility.Vector3iVector(
+                faces
+            )
+
+            # Export the appearance currently selected in the application.
+            if (
+                self.display_mode == "vertex_colors"
+                and "RGB" in mesh.point_data
+            ):
+                rgb = np.asarray(mesh.point_data["RGB"])
+
+                export_colors = rgb.astype(np.float64) / 255.0
+
+            else:
+                # Match the gray appearance used in the viewer.
+                gray = 192 / 255.0
+
+                export_colors = np.tile(
+                    [gray, gray, gray],
+                    (len(vertices), 1),
+                )
+
+            export_mesh.vertex_colors = (
+                o3d.utility.Vector3dVector(export_colors)
+            )
+
+            export_mesh.compute_vertex_normals()
+
+            success = o3d.io.write_triangle_mesh(
+                path,
+                export_mesh,
+                write_ascii=False,
+                write_vertex_colors=True,
+            )
+
+            if not success:
+                raise RuntimeError(
+                    "Open3D could not write the PLY file."
+                )
+
+            self.statusBar().showMessage(
+                f"Mesh exported successfully: {Path(path).name}"
+            )
+
+        except Exception as error:
+            self.statusBar().showMessage(
+                f"PLY export failed: {error}"
+            )
+            print("PLY export failed:", error)
+
+
+
+    def export_png(self):
+        if self.displayed_mesh is None:
+            self.statusBar().showMessage(
+                "No mesh available to export."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export frontal PNG",
+            "exported_mesh.png",
+            "PNG files (*.png)",
+        )
+
+        if not path:
+            return
+
+        if not path.lower().endswith(".png"):
+            path += ".png"
+
+        plotter = None
+
+        try:
+            mesh = self.displayed_mesh
+
+            # Create an independent, off-screen renderer.
+            plotter = pv.Plotter(
+                off_screen=True,
+                window_size=(3000, 3000),
+            )
+
+            plotter.set_background("white")
+
+            # Display the selected appearance.
+            if (
+                self.display_mode == "vertex_colors"
+                and "RGB" in mesh.point_data
+            ):
+                plotter.add_mesh(
+                    mesh,
+                    scalars="RGB",
+                    rgb=True,
+                    smooth_shading=False,
+                    lighting=True,
+                    ambient=0.15,
+                    diffuse=1.0,
+                    specular=0.0,
+                    show_edges=False,
+                )
+
+            else:
+                plotter.add_mesh(
+                    mesh,
+                    color="#c0c0c0",
+                    smooth_shading=False,
+                    lighting=True,
+                    ambient=0.15,
+                    diffuse=1.0,
+                    specular=0.0,
+                    show_edges=False,
+                )
+
+            # Match the application's frontal viewing direction.
+            plotter.view_xy()
+
+            # Use orthographic projection (no perspective distortion).
+            plotter.enable_parallel_projection()
+
+            # Automatically fit the complete mesh into the image.
+            plotter.reset_camera()
+
+            # Render and save with transparent background.
+            plotter.screenshot(
+                path,
+                transparent_background=True,
+            )
+
+            self.statusBar().showMessage(
+                f"PNG exported successfully: {Path(path).name}"
+            )
+
+        except Exception as error:
+            self.statusBar().showMessage(
+                f"PNG export failed: {error}"
+            )
+            print("PNG export failed:", error)
+
+        finally:
+            if plotter is not None:
+                plotter.close()
