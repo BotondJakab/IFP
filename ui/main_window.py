@@ -209,6 +209,8 @@ class MainWindow(QMainWindow):
         self.cut_background_button.clicked.connect(
             self.toggle_background_cut
         )
+        self.cut_background_button.setVisible(False)     
+
         controls_layout.addWidget(self.cut_background_button)
         
         # Export section
@@ -225,9 +227,9 @@ class MainWindow(QMainWindow):
         self.export_png_button.clicked.connect(self.export_png)
         export_layout.addWidget(self.export_png_button)
 
-        controls_layout.addWidget(export_box)
-
         controls_layout.addStretch()
+
+        controls_layout.addWidget(export_box)
 
         main_layout.addWidget(controls, 1)
 
@@ -614,6 +616,7 @@ class MainWindow(QMainWindow):
             self.run_button.setEnabled(False)
             self.load_button.setEnabled(False)
             self.reload_button.setEnabled(False)
+            self.display_mode_button.setEnabled(False)
             self.grid_slider.setEnabled(False)
             self.threshold_input.setEnabled(False)
 
@@ -793,7 +796,7 @@ class MainWindow(QMainWindow):
         """
         self.display_mesh(preview_mesh, reset_camera=False)
 
-        self.update_grid_overlay()
+        #self.update_grid_overlay()
 
         self.progress_bar.setValue(100)
         self.progress_label.setText("Flattening complete")
@@ -806,6 +809,8 @@ class MainWindow(QMainWindow):
         self.run_button.setEnabled(True)
         self.load_button.setEnabled(True)
         self.reload_button.setEnabled(True)
+        self.display_mode_button.setEnabled(True)
+        self.display_mode_button.setChecked(False)
         self.grid_slider.setEnabled(True)
         self.threshold_input.setEnabled(True)
         self.level_button.setEnabled(True)
@@ -857,6 +862,8 @@ class MainWindow(QMainWindow):
             self.clipped_mesh = None
             self.showing_clipped_mesh = False
             self.cut_background_button.setEnabled(True)
+            self.cut_background_button.setVisible(True)     
+
 
             # Clear the previous visualization.
             self.viewer.clear()
