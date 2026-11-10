@@ -219,6 +219,9 @@ __marimo__/
 
 #Data - Meshes
 data/
+results_ply/
+results_png/
+evaluation/
 
 *.ply
 *.png

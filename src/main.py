@@ -20,10 +20,11 @@ from leveling import (
     level_cell,
     level_mesh,
 )
+
 # Load mesh
 mesh, vertices, faces = load_mesh(
-    #"data/Worms_19_GMO.ply"
-    "data/BleiplatteSpeyer2.ply"
+    "data/Worms_188.ply"
+    #"data/BleiplatteSpeyer2.ply"
 )
 
 
@@ -35,9 +36,9 @@ print("Number of faces:", len(faces))
 # Create XY grid
 grid = create_grid(
     vertices,
-    cell_size=10
+    cell_size=50
 )
-threshold=.003
+threshold=.9
 
 print("Grid size:")
 print(
@@ -98,7 +99,7 @@ cell_points = vertices[indices]
 
 fit_plane_pca(cell_points)"""
 
-"""
+""""""
 test_cell = (6, 8) #max(cells, key=lambda cell: len(cells[cell]))
 test_cells = [
     (6,8),   # flat surface with carvings
@@ -132,11 +133,11 @@ leveled_points = level_cell(
 ) 
 
 #show_cell_with_plane(leveled_points, np.zeros(len(flattened_points)),plane)
-#show_cell(cell_points)
+show_cell(cell_points)
 show_cell_with_plane(cell_points, distances, plane)
 show_cell_with_plane(flattened_points, distances,plane)
 
-"""
+
 """
 print("Distance statistics:")
 print("min:", distances.min())

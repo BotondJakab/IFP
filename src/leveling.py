@@ -120,7 +120,7 @@ def level_cell(points, plane):
 
     return leveled_points
 
-def level_mesh(vertices, cells, cell_planes):
+def level_mesh(vertices, cells, cell_planes, return_statistics=False):
     """
     Levels every occupied cell using its fitted PCA plane.
 
@@ -143,6 +143,9 @@ def level_mesh(vertices, cells, cell_planes):
 
     new_vertices = vertices.copy()
 
+    leveled_cells = 0
+    transformed_vertices = 0
+
     for cell, indices in cells.items():
 
         # If this cell did not receive a plane,
@@ -160,5 +163,16 @@ def level_mesh(vertices, cells, cell_planes):
         )
 
         new_vertices[indices] = leveled_points
+
+        leveled_cells += 1
+        transformed_vertices += len(indices)
+
+    if return_statistics:
+        statistics = {
+            "leveled_cells": leveled_cells,
+            "transformed_vertices": transformed_vertices,
+        }
+
+        return new_vertices, statistics
 
     return new_vertices

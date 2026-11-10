@@ -1,6 +1,6 @@
 import numpy as np
 
-def flatten_cell(points, plane, threshold):
+def flatten_cell(points, plane, threshold, return_statistics=False):
     """
     Flatten points close to a fitted plane.
 
@@ -27,6 +27,9 @@ def flatten_cell(points, plane, threshold):
 
     flattened = []
 
+    distance_calculations = 0
+    projected_vertices = 0
+
     for p in points:
 
         distance = np.dot(
@@ -34,6 +37,7 @@ def flatten_cell(points, plane, threshold):
             normal
         )
 
+        distance_calculations += 1
 
         if (abs(distance) < threshold) or (distance > 0):# or (abs(distance)>0.01):
 
@@ -41,6 +45,8 @@ def flatten_cell(points, plane, threshold):
             new_point = (
                 p - distance * normal
             )
+            projected_vertices += 1
+
 
         else:
 
@@ -50,6 +56,15 @@ def flatten_cell(points, plane, threshold):
 
         flattened.append(new_point)
 
+    flattened = np.array(flattened)
+
+    if return_statistics:
+            statistics = {
+                "distance_calculations": distance_calculations,
+                "projected_vertices": projected_vertices,
+            }
+
+            return flattened, statistics
 
     return np.array(flattened)
 
@@ -451,6 +466,9 @@ def flatten_mesh(
     flattened_vertices = 0
     preserved_vertices = 0
 
+    distance_calculations = 0
+    projected_vertices = 0
+
     report(
         "flattening", None, 0, total_cells,
         "stage_started"
@@ -467,11 +485,15 @@ def flatten_mesh(
         cell_points = vertices[indices]
         plane = cell_planes[cell]
 
-        flattened_points = flatten_cell(
+        flattened_points, cell_statistics = flatten_cell(
             cell_points,
             plane,
-            threshold
+            threshold,
+            return_statistics=True
         )
+
+        distance_calculations += cell_statistics["distance_calculations"]
+        projected_vertices += cell_statistics["projected_vertices"]
 
         # Count what happened
         changed = np.linalg.norm(
@@ -514,6 +536,8 @@ def flatten_mesh(
         "inherited_cells": inherited_cells,
         "flattened_vertices": flattened_vertices,
         "preserved_vertices": preserved_vertices,
+        "distance_calculations": distance_calculations,
+        "projected_vertices": projected_vertices,
     }
 
     return new_vertices, cell_planes, statistics
