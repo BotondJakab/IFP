@@ -1,14 +1,13 @@
 import numpy as np
 
 
-def create_grid(vertices, cell_size):
+def create_grid(vertices, cell_size, offset=0):
 
-    x_min = vertices[:,0].min()
-    x_max = vertices[:,0].max()
+    x_min = vertices[:, 0].min() - offset
+    x_max = vertices[:, 0].max()
 
-    y_min = vertices[:,1].min()
-    y_max = vertices[:,1].max()
-
+    y_min = vertices[:, 1].min() - offset
+    y_max = vertices[:, 1].max()
 
     width = x_max - x_min
     height = y_max - y_min
